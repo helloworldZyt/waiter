@@ -21,11 +21,11 @@
 #define LOGRECORD(x, format, ...) \
 { \
     int levelx = x; \
-    logs_print(NULL, x, "[%d] "format, (int)syscall(SYS_gettid), __VA_ARGS__); \
+    logs_print(NULL, x, format, ##__VA_ARGS__); \
 }
 
 #define LogRecord       LOGRECORD
 
 // not avilable for c99, __VA_ARGS__ -> ##__VA_ARGS__
-#define LOGERR(format, ...)     LOGRECORD(LELVE_ERR, format, __VA_ARGS__)
-#define LOGDBG(format, ...)      LOGRECORD(LELVE_DBG, format, __VA_ARGS__)
+#define LOGERR(format, ...)     LOGRECORD(LELVE_ERR, format, ##__VA_ARGS__)
+#define LOGDBG(format, ...)      LOGRECORD(LELVE_DBG, format, ##__VA_ARGS__)

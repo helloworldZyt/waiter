@@ -21,6 +21,10 @@
 #include <net/if.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/syscall.h>
+#include <sys/time.h>
+
+#include "debug.h"
 
 #define LEN128		128
 #define LEN512		512
@@ -37,7 +41,7 @@ char * log_promat(char *prombuf) {
 	localtime_r(&tv.tv_sec, &janustmresult);
 	strftime(log_ts_pre, sizeof(log_ts_pre),
 				"%Y-%m-%d %H:%M:%S", &janustmresult);
-	snprintf(prombuf, LEN128-1, "%s.%03d", log_ts_pre, (int)tv.tv_usec/1000);
+	snprintf(prombuf, LEN128-1, "%s.%03d [%d]", log_ts_pre, (int)tv.tv_usec/1000, (int)syscall(SYS_gettid));
 	return prombuf;
 }
 
@@ -78,8 +82,8 @@ void util_dump_buf(char *buf, int len) {
 			}
 		}
 		
-		printf("[%s]dump_buf %s\n",log_promat(prom), outbuf);
-		printf("[%s]dump_buf %s\n",log_promat(prom), outbufvis);
+		LOGDBG("[%s]dump_buf %s\n",log_promat(prom), outbuf);
+		LOGDBG("[%s]dump_buf %s\n",log_promat(prom), outbufvis);
 	}
 	return;
 }
@@ -90,7 +94,7 @@ int connect_to(const char *ip, int port) {
 
 	clifd = socket(AF_INET, SOCK_STREAM, 0);
 	if (clifd < 0) {
-		perror("create socket");
+		LOGERR("create socket");
 		return -1;
 	}
 	int clifml = AF_INET;
@@ -101,7 +105,7 @@ int connect_to(const char *ip, int port) {
 	size_t addrlen = (clifml == AF_INET)?sizeof(dstaddr):sizeof(dstaddr);
 
 	if (connect(clifd, (struct sockaddr *)&dstaddr, sizeof(dstaddr)) < 0) {
-		perror("connect to");
+		LOGERR("connect to");
 		close(clifd);
 		return -1;
 	}
@@ -114,7 +118,7 @@ int wait_on(const char *ip, int port) {
 
 	clifd = socket(AF_INET, SOCK_STREAM, 0);
 	if (clifd < 0) {
-		perror("create socket");
+		LOGERR("create socket");
 		return -1;
 	}
 	int clifml = AF_INET;
@@ -125,13 +129,13 @@ int wait_on(const char *ip, int port) {
 	size_t addrlen = (clifml == AF_INET)?sizeof(dstaddr):sizeof(dstaddr);
 	struct sockaddr *addrp = (struct sockaddr *)&dstaddr;
 	if (bind(clifd, addrp, addrlen) < 0) {
-		perror("bind on");
+		LOGERR("bind on");
 		close(clifd);
 		return -1;
 	}
 
 	if (listen(clifd, 50) < 0) {
-		perror("wait on");
+		LOGERR("wait on");
 		close(clifd);
 		return -1;
 	}
@@ -172,7 +176,7 @@ typedef struct gust_attribute {
 
 void *guest_running(void *arg) {
 	if (NULL == arg) {
-		printf("running param error!\n");
+		LOGERR("running param error!\n");
 		return NULL;
 	}
 	GuestAttri *guest = (GuestAttri *)arg;
@@ -183,7 +187,7 @@ void *guest_running(void *arg) {
 
 	char prom[LEN128] = {0};
 	int broken_flag = 0;
-	printf("[%s] new guest\n", log_promat(prom)); 
+	LOGDBG("[%s] new guest\n", log_promat(prom)); 
 	for(;;) {
 		num	= 0;
 		memset(fds, 0, sizeof(fds));
@@ -195,20 +199,20 @@ void *guest_running(void *arg) {
 		ret = poll(fds, num, 10000);
 		if (0 > ret) {
 			if (errno == EINTR) {
-				printf("[%s]Got an EINTR (%s), ignoring...\n", log_promat(prom), strerror(errno)); 
+				LOGDBG("[%s]Got an EINTR (%s), ignoring...\n", log_promat(prom), strerror(errno)); 
 				continue;
 			} else {
 				break;
 			}
 		} else if (0 == ret) {
-			printf("[%s]wait guest timeout!\n", log_promat(prom)); 
+			LOGDBG("[%s]wait guest timeout!\n", log_promat(prom)); 
 			continue;
 		}
-		printf("##################### data start %d %s ######################\n", ret, log_promat(prom)); 
+		LOGDBG("##################### data start %d %s ######################\n", ret, log_promat(prom)); 
 		for(i = 0; i < num; i++) {
 			if (fds[i].revents & (POLLERR)) {
 				broken_flag = 1;
-				printf("[%s]Got poll POLLERR %d (%s)\n", log_promat(prom), errno, strerror(errno)); 
+				LOGDBG("[%s]Got poll POLLERR %d (%s)\n", log_promat(prom), errno, strerror(errno)); 
 				break;
 			} else if (fds[i].revents & POLLIN) {
 				if (fds[i].fd == guest->confd) {
@@ -216,29 +220,29 @@ void *guest_running(void *arg) {
 					util_dump_buf(rcvbuf, rcvlen);
 					if (rcvlen == 0) {
 						broken_flag = 1;
-						printf("[%s]Got recvlen 0 %d (%s)\n", log_promat(prom), errno, strerror(errno)); 
+						LOGDBG("[%s]Got recvlen 0 %d (%s)\n", log_promat(prom), errno, strerror(errno)); 
 						break;
 					}
 				} else {
 					broken_flag = 1;
-					printf("[%s]Got poll unknown fd %d (%s)\n", log_promat(prom), errno, strerror(errno)); 
+					LOGDBG("[%s]Got poll unknown fd %d (%s)\n", log_promat(prom), errno, strerror(errno)); 
 					break;
 				}
 			} else if (fds[i].revents & (POLLHUP)) {
 				broken_flag = 1;
-				printf("[%s]Got poll POLLHUP %d (%s)\n", log_promat(prom), errno, strerror(errno)); 
+				LOGDBG("[%s]Got poll POLLHUP %d (%s)\n", log_promat(prom), errno, strerror(errno)); 
 				break;
 			} else if (fds[i].revents & (POLLNVAL)) {
 				broken_flag = 1;
-				printf("[%s]Got poll POLLNVAL %d (%s)\n", log_promat(prom), errno, strerror(errno)); 
+				LOGDBG("[%s]Got poll POLLNVAL %d (%s)\n", log_promat(prom), errno, strerror(errno)); 
 				break;
 			} else {
 				broken_flag = 1;
-				printf("[%s]Got poll POLLNVAL %d (%s) %p\n", log_promat(prom), errno, strerror(errno), fds[i].revents); 
+				LOGDBG("[%s]Got poll POLLNVAL %d (%s) %p\n", log_promat(prom), errno, strerror(errno), fds[i].revents); 
 				break;
 			}
 		}
-		printf("##################### data end %s ######################\n", log_promat(prom)); 
+		LOGDBG("##################### data end %s ######################\n", log_promat(prom)); 
 		usleep(10000);
 		if (broken_flag != 0) {
 			break;
@@ -249,7 +253,7 @@ void *guest_running(void *arg) {
 
 void *waiter_running(void *arg) {
 	if (NULL == arg) {
-		printf("running param error!\n");
+		LOGDBG("running param error!\n");
 		return NULL;
 	}
 	GuestAttri *guest_list[MAX_EVENTS] = {NULL};
@@ -257,7 +261,7 @@ void *waiter_running(void *arg) {
 	WaiterAttri *waiter = (WaiterAttri *)arg;
 	int waitfd = wait_on(waiter->ip, waiter->port);
 	if (waitfd < 0) {
-		printf("running failed at wait on!\n");
+		LOGDBG("running failed at wait on!\n");
 		return NULL;
 	}
 	int listen_sock, conn_sock, nfds, epollfd, i, n;
@@ -268,24 +272,24 @@ void *waiter_running(void *arg) {
 
 	epollfd = epoll_create1(0);
 	if (epollfd == -1) {
-		perror("epoll_create1");
+		LOGERR("epoll_create1");
 		exit(EXIT_FAILURE);
 	}
 
 	ev.events = EPOLLIN;
 	ev.data.fd = listen_sock;
 	if (epoll_ctl(epollfd, EPOLL_CTL_ADD, listen_sock, &ev) == -1) {
-		perror("epoll_ctl: listen_sock");
+		LOGERR("epoll_ctl: listen_sock");
 		exit(EXIT_FAILURE);
 	}
 	char prom[LEN128] = {0};
-	printf("[%s]waiter running on %s %d, with fd %d...\n", log_promat(prom), waiter->ip, waiter->port, waitfd);
+	LOGDBG("[%s]waiter running on %s %d, with fd %d...\n", log_promat(prom), waiter->ip, waiter->port, waitfd);
 	 
 
 	for (;;) {
 		nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
 		if (nfds == -1) {
-			perror("epoll_wait");
+			LOGERR("epoll_wait");
 			break;
 		}
 
@@ -295,14 +299,14 @@ void *waiter_running(void *arg) {
 			if (events[n].data.fd == listen_sock) {
 				conn_sock = accept(listen_sock, (struct sockaddr *) &guestaddr, &guestaddrlen);
 				if (conn_sock == -1) {
-					perror("accept");
+					LOGERR("accept");
 					break;
 				}
 				setnonblocking(conn_sock);
 				// ev.events = EPOLLIN | EPOLLET;
 				// ev.data.fd = conn_sock;
 				// if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) == -1) {
-				// 	perror("epoll_ctl: conn_sock");
+				// 	LOGERR("epoll_ctl: conn_sock");
 				// 	exit(EXIT_FAILURE);
 				// }
 				GuestAttri *guest = (GuestAttri *)malloc(sizeof(GuestAttri));
@@ -311,7 +315,7 @@ void *waiter_running(void *arg) {
 					guest->num = guest_cnt++;
 					inet_ntop(guestaddr.sin_family, &(guestaddr.sin_addr), guest->ip, sizeof(guest->ip));
 					guest->port= ntohs(guestaddr.sin_port);
-					printf("[%s]Got new guest %s %d\n", log_promat(prom), guest->ip, guest->port); 
+					LOGDBG("[%s]Got new guest %s %d\n", log_promat(prom), guest->ip, guest->port); 
 					pthread_create(&guest->thread_id, NULL, guest_running, (void *)guest);
 					guest_list[guest_cnt-1] = guest;
 				}
@@ -328,18 +332,18 @@ int waiter_new(const char *ip , int port) {
 	WaiterAttri *waiter = NULL;
 	char prom[LEN128] = {0};
 	if (ip == NULL || port <= 0) {
-		printf("Param error!\n");
+		LOGDBG("Param error!\n");
 		return -999;
 	}
 	waiter = (WaiterAttri *)malloc(sizeof(WaiterAttri));
 	if (NULL == waiter) {
-		perror("malloc");
+		LOGERR("malloc");
 		return -1;
 	}
 	waiter->ip = strdup(ip);
 	waiter->port = port;
 	
-	printf("[%s]new waiter on %s %d\n", log_promat(prom), ip, port); 
+	LOGDBG("[%s]new waiter on %s %d\n", log_promat(prom), ip, port); 
 	waiter_running(waiter);
 	return 0;
 }
@@ -348,7 +352,7 @@ int waiter_new(const char *ip , int port) {
 **********************************************************************/
 
 int main (int argc, char *argv[]) {
-	const char *dsthost = "127.0.0.1";
+	const char *dsthost = "0.0.0.0";
 	int dstport = 0;
 	dstport = 554;
 	if (argc > 2) {
@@ -356,9 +360,8 @@ int main (int argc, char *argv[]) {
 		dstport = atoi(argv[2]);
 	} else if (argc > 1) {
 		dsthost = strdup(argv[1]);
-	} else {
 	}
-
+	logs_init("/tmp/waiter/waiter.log", 9, NULL);
 	waiter_new(dsthost, dstport);
 
 	return 0;

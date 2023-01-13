@@ -199,6 +199,7 @@ int rb_data_size(RBuffer *buf) {
 typedef struct logs_context {
     const char *log_path;
     int log_level;
+    int stdoutput;
     RBuffer *buffers;
     int drop_cnt;
     int stoped;
@@ -245,7 +246,9 @@ void *logs_output_thread(void *arg) {
         int datasize = rb_data_size(ctx->buffers);
         
         while((poplen = rb_pop_data(ctx->buffers, buffer, sizeof(buffer))) > 0) {
-            // printf("%s", buffer);
+            if (ctx->stdoutput) {
+                printf("%s", buffer);
+            }
             fwrite(buffer, poplen, 1, fp);
             fflush(fp);
 
@@ -367,6 +370,7 @@ int logs_print(void *log_ctx, int level, const char *fmt, ...) {
     } else {
         ctx->drop_cnt++;
     }
+    ctx->stdoutput = 1;
     
     return 0;
 }

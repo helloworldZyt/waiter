@@ -1,6 +1,6 @@
 #TARGET_s_lib=librtmpclient.a
 #TARGET_d_lib=librtmpclient.so
-TARGET_exec=go
+TARGET_exec=dotest
 
 
 #TARGET=$(TARGET_s_lib)
@@ -10,7 +10,8 @@ TARGET=$(TARGET_exec)
 
 SRC_FILE= waiter.c
 CFLAGS=-I. -pthread
-obj_src=waiter.o
+obj_src=waiter.o \
+	logs.o \
 
 all:$(TARGET)
 
