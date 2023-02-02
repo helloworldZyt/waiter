@@ -164,7 +164,7 @@ typedef struct waiter_attribute {
 	pthread_t thread_id;
 	char *ip;
 	int port;
-} WaiterAttri;
+} WaiterAttri, SenderAttri;
 
 typedef struct gust_attribute {
 	pthread_t thread_id;
@@ -223,6 +223,7 @@ void *guest_running(void *arg) {
 						LOGDBG("[%s]Got recvlen 0 %d (%s)\n", log_promat(prom), errno, strerror(errno)); 
 						break;
 					}
+					send(guest->confd, rcvbuf, rcvlen, 0);
 				} else {
 					broken_flag = 1;
 					LOGDBG("[%s]Got poll unknown fd %d (%s)\n", log_promat(prom), errno, strerror(errno)); 
@@ -347,6 +348,11 @@ int waiter_new(const char *ip , int port) {
 	waiter_running(waiter);
 	return 0;
 }
+
+int sender_new(const char *ip, int port) {
+	int snd_fd = connect_to(ip, port);
+	return 0;
+}
 /*********************************************************************
  * the waiter ^^^^^^^^^^^^^^^^ end ^^^^^^^^^^^^^^^^
 **********************************************************************/
@@ -354,15 +360,28 @@ int waiter_new(const char *ip , int port) {
 int main (int argc, char *argv[]) {
 	const char *dsthost = "0.0.0.0";
 	int dstport = 0;
+	const char *comnd = "waiter";
+
 	dstport = 554;
-	if (argc > 2) {
+	if (argc > 3) {
+		comnd = argv[1];
+		dsthost = strdup(argv[2]);
+		dstport = atoi(argv[3]);
+	}
+	else if (argc > 2) {
 		dsthost = strdup(argv[1]);
 		dstport = atoi(argv[2]);
 	} else if (argc > 1) {
 		dsthost = strdup(argv[1]);
 	}
-	logs_init("/tmp/waiter/waiter.log", 9, NULL);
-	waiter_new(dsthost, dstport);
+	if (comnd && !strcasecmp(comnd, "sender")) {
+		logs_init("/tmp/waiter/sender.log", 9, NULL);
+		sender_new(dsthost, dstport);
+	} else {
+		logs_init("/tmp/waiter/waiter.log", 9, NULL);
+		waiter_new(dsthost, dstport);
+	}
+	
 
 	return 0;
 }
