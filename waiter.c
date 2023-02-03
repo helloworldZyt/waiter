@@ -23,6 +23,11 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
+#include <signal.h>
+#include <syslog.h>
+#include <fcntl.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
 
 #include "debug.h"
 
@@ -353,6 +358,70 @@ int sender_new(const char *ip, int port) {
 	int snd_fd = connect_to(ip, port);
 	return 0;
 }
+
+#define err_quit	LOGDBG
+
+void daemonize(const char *cmd){
+    int i, fd0, fd1, fd2;
+    pid_t pid;
+    struct rlimit rl;
+    struct sigaction sa;
+    /* * Clear file creation mask. */
+	/* 因为我们从shell创建的daemon子进程，所以daemon子进程会继承shell的umask，
+		如果不清除的话，会导致daemon进程创建文件时屏蔽某些权限 */
+    umask(0);
+    /* * Get maximum number of file descriptors. */
+    if (getrlimit(RLIMIT_NOFILE, &rl) < 0)
+        err_quit("%s: can't get file limit", cmd);
+    /* * Become a session leader to lose controlling TTY. */
+	/* fork后让父进程退出，子进程获得新的pid，肯定不为进程组组长，这是setsid前提 */
+    if ((pid = fork()) < 0) {
+        err_quit("%s: can't fork", cmd);
+	} else if (pid != 0) { /* parent */
+        exit(0);
+	}
+	/* 调用setsid来创建新的进程会话。这使得daemon进程成为会话首进程，脱离和terminal的关联 */
+    setsid();
+    /* * Ensure future opens won't allocate controlling TTYs. */
+    sa.sa_handler = SIG_IGN;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGHUP, &sa, NULL) < 0)
+        err_quit("%s: can't ignore SIGHUP", cmd);
+	/* 最好在这里再次fork。这样使得daemon进程不再是会话首进程，那么永远没有机会获得控制终端。
+		如果这里不fork的话，会话首进程依然可能打开控制终端
+	 */
+    if ((pid = fork()) < 0) {
+        err_quit("%s: can't fork", cmd);
+	} else if (pid != 0) { /* parent */
+        exit(0);
+	}
+    /* * Change the current working directory to the root so * we won't prevent file systems from being unmounted. */
+	/* 将当前工作目录切换到根目录。父进程继承过来的当前目录可能mount在一个文件系统上，
+		如果不切换到根目录，那么这个文件系统不允许unmount
+	 */
+    if (chdir("/") < 0)
+        err_quit("%s: can't change directory to /", cmd);
+    /* * Close all open file descriptors. */
+    if (rl.rlim_max == RLIM_INFINITY)
+        rl.rlim_max = 1024;
+	/* 在子进程中关闭从父进程中继承过来的那些不需要的文件描述符。
+		可以通过_SC_OPEN_MAX来判断最高文件描述符(不是很必须) */
+    for (i = 0; i < rl.rlim_max; i++)
+        close(i);
+    /* * Attach file descriptors 0, 1, and 2 to /dev/null. */
+	/*  */
+    fd0 = open("/dev/null", O_RDWR);
+    fd1 = dup(0);
+    fd2 = dup(0);
+    /* * Initialize the log file. */
+    openlog(cmd, LOG_CONS, LOG_DAEMON);
+    if (fd0 != 0 || fd1 != 1 || fd2 != 2) {
+        syslog(LOG_ERR, "unexpected file descriptors %d %d %d",fd0, fd1, fd2);
+        exit(1);
+    }
+}
+
 /*********************************************************************
  * the waiter ^^^^^^^^^^^^^^^^ end ^^^^^^^^^^^^^^^^
 **********************************************************************/
@@ -361,6 +430,9 @@ int main (int argc, char *argv[]) {
 	const char *dsthost = "0.0.0.0";
 	int dstport = 0;
 	const char *comnd = "waiter";
+
+	openlog(argv[0], 3, 7);
+	syslog(LOG_INFO, "waiter start...\n");
 
 	dstport = 554;
 	if (argc > 3) {
@@ -379,6 +451,7 @@ int main (int argc, char *argv[]) {
 		sender_new(dsthost, dstport);
 	} else {
 		logs_init("/tmp/waiter/waiter.log", 9, NULL);
+		daemonize(NULL);
 		waiter_new(dsthost, dstport);
 	}
 	
